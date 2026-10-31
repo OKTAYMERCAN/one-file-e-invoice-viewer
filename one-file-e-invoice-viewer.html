@@ -1,0 +1,1343 @@
+<title>Fatura Okuyucu</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: header with language and theme switches, a drop area, file chips, then one invoice sheet
+   (seller left, document box right, buyer, item table, notes left, totals right).
+   Dark theme is pure black (#000) so OLED pixels stay off. */
+:root {
+  --bg: #E8EDF0;
+  --paper: #FFFFFF;
+  --ink: #15222B;
+  --muted: #587080;
+  --line: #D2DBE1;
+  --soft: #F2F5F7;
+  --accent: #14607E;
+  --accent-ink: #FFFFFF;
+  --accent-soft: #DCEAF1;
+  --err: #A32629;
+  --err-bg: #FBE8E8;
+  --font-display: 'Segoe UI Variable Display', 'Segoe UI', 'Helvetica Neue', Arial, system-ui, sans-serif;
+  --font-body: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #000000; --paper: #000000; --ink: #ECECEC; --muted: #8E9AA2; --line: #262B2F;
+    --soft: #0B0D0E; --accent: #6DB8D6; --accent-ink: #000000; --accent-soft: #0A1A22;
+    --err: #F29295; --err-bg: #1F0A0B; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #000000; --paper: #000000; --ink: #ECECEC; --muted: #8E9AA2; --line: #262B2F;
+  --soft: #0B0D0E; --accent: #6DB8D6; --accent-ink: #000000; --accent-soft: #0A1A22;
+  --err: #F29295; --err-bg: #1F0A0B; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+  padding-block: 24px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 980px; margin: 0 auto; }
+.mono { font-family: var(--font-mono); }
+.cap { color: var(--muted); font-size: 12.5px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+header.top { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 20px; margin-bottom: 16px; }
+.titles { min-width: 0; flex: 1 1 320px; }
+h1 { font: 800 26px/1.1 var(--font-display); letter-spacing: -0.01em; margin: 0 0 4px; }
+.controls { display: flex; align-items: center; gap: 8px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button {
+  all: unset; box-sizing: border-box; cursor: pointer; padding: 7px 12px; font: 600 12.5px/1 var(--font-body);
+  letter-spacing: 0.04em; color: var(--muted);
+}
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.seg button:focus-visible, .icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.icon-btn {
+  all: unset; box-sizing: border-box; cursor: pointer; width: 34px; height: 32px; display: grid; place-items: center;
+  border: 1px solid var(--line); border-radius: 6px; color: var(--ink);
+}
+.icon-btn:hover { border-color: var(--accent); }
+.icon-btn svg { width: 17px; height: 17px; }
+
+.drop {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px;
+  border: 1.5px dashed var(--line); border-radius: 6px; background: var(--soft); padding: 14px 16px;
+  transition: border-color .15s, background-color .15s;
+}
+.drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.drop-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 320px; }
+.btn {
+  display: inline-block; font: 500 14px/1.2 var(--font-body); padding: 9px 16px; border-radius: 5px;
+  border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); cursor: pointer;
+}
+.btn.ghost { background: transparent; color: var(--accent); }
+.btn:hover { filter: brightness(1.1); }
+.btn:focus-visible, label.btn:focus-within, .chip .sel:focus-visible, .chip .x:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.formats { margin: 8px 2px 0; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 4px; max-width: 100%;
+  border: 1px solid var(--line); background: var(--paper); border-radius: 999px; padding: 3px 4px 3px 12px; font-size: 13px;
+}
+.chip[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.chip.bad { border-color: var(--err); color: var(--err); }
+.chip .sel { all: unset; cursor: pointer; min-width: 0; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip .x { all: unset; cursor: pointer; width: 22px; height: 22px; line-height: 22px; text-align: center; border-radius: 50%; color: var(--muted); }
+.chip .x:hover { background: var(--line); }
+
+.notice { margin-top: 12px; padding: 10px 14px; border-radius: 5px; font-size: 13.5px; overflow-wrap: anywhere; }
+.notice.info { background: var(--accent-soft); }
+.notice.err { background: var(--err-bg); color: var(--err); }
+
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 10px; }
+
+.sheet {
+  background: var(--paper); border: 1px solid var(--line); border-radius: 4px;
+  padding: clamp(16px, 4vw, 36px); margin-top: 10px;
+}
+.sheet:empty { display: none; }
+.head { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 28px; }
+.eyebrow { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin: 0 0 4px; }
+.party h2 { font: 700 20px/1.25 var(--font-display); margin: 0 0 6px; text-wrap: balance; overflow-wrap: anywhere; }
+.party h3 { font: 700 16px/1.3 var(--font-display); margin: 0 0 4px; overflow-wrap: anywhere; }
+.party > div { overflow-wrap: anywhere; }
+.k { color: var(--muted); font-size: 12.5px; margin-right: 4px; }
+.idline { font-size: 13.5px; }
+.docbox { border: 1.5px solid var(--ink); padding: 14px 16px; min-width: 0; }
+.docbox .fmt { display: inline-block; font: 500 11px/1 var(--font-mono); letter-spacing: 0.02em; color: var(--accent); border: 1px solid var(--accent); border-radius: 3px; padding: 3px 6px; margin-bottom: 10px; }
+.docbox .label { font: 800 22px/1.1 var(--font-display); letter-spacing: 0.05em; text-transform: uppercase; overflow-wrap: anywhere; }
+.docbox .kind { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 6px 0 12px; min-height: 1em; }
+dl.meta { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 14px; margin: 0; }
+dl.meta dt { color: var(--muted); font-size: 12.5px; }
+dl.meta dd { margin: 0; font: 400 13px/1.4 var(--font-mono); text-align: right; overflow-wrap: anywhere; }
+.buyer { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--line); }
+
+.tablewrap { margin-top: 24px; overflow-x: auto; }
+table.items { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.items th {
+  font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600;
+  text-align: left; padding: 8px 10px; border-bottom: 1.5px solid var(--ink); white-space: nowrap;
+}
+.items td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.items th.num, .items td.num { text-align: right; }
+.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.items .name { min-width: 200px; overflow-wrap: anywhere; }
+.items .name strong { font-weight: 600; }
+.items .cap { display: block; }
+.empty-lines { margin-top: 24px; color: var(--muted); }
+
+.foot { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 380px); gap: 28px; margin-top: 24px; }
+.foot-left { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.foot-left ul { margin: 0; padding-left: 18px; }
+.foot-left li { overflow-wrap: anywhere; }
+table.totals { width: 100%; border-collapse: collapse; font-size: 14px; }
+.totals td { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.totals td:last-child { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; padding-left: 12px; }
+.totals tr.grand td { border-bottom: 0; border-top: 2px solid var(--ink); padding-top: 10px; font: 700 18px/1.3 var(--font-display); }
+.totals tr.incl td { color: var(--muted); font-size: 13px; }
+.words { margin-top: 20px; background: var(--soft); padding: 10px 14px; font-size: 13.5px; }
+.fine {
+  margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px;
+  display: flex; flex-wrap: wrap; gap: 4px 18px;
+}
+.fine span { overflow-wrap: anywhere; }
+
+.toast {
+  position: fixed; left: 0; right: 0; bottom: 0; display: flex; justify-content: center; pointer-events: none;
+  padding: 0 max(16px, env(safe-area-inset-left, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-right, 0px));
+}
+.toast span {
+  background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: 6px; font-size: 13.5px;
+  opacity: 0; transform: translateY(6px); transition: opacity .18s, transform .18s;
+}
+.toast.show span { opacity: 1; transform: none; }
+
+@media (max-width: 700px) {
+  .head, .foot { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .tablewrap { overflow-x: visible; }
+  .items thead { display: none; }
+  .items, .items tbody, .items tr, .items td { display: block; width: 100%; }
+  .items tr { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .items td { border: 0; padding: 2px 0; display: flex; justify-content: space-between; gap: 12px; text-align: right; }
+  .items td::before { content: attr(data-label); color: var(--muted); font-size: 12px; text-align: left; flex: none; }
+  .items td.name { display: block; text-align: left; }
+  .items td.name::before { display: none; }
+  .items td.idx, .items td:empty { display: none; }
+  .items td .v { text-align: right; }
+  .num { white-space: normal; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .drop, .toast span { transition: none; }
+}
+</style>
+
+<main class="wrap">
+  <header class="top">
+    <div class="titles">
+      <h1 data-i="title"></h1>
+      <p class="cap" data-i="subtitle"></p>
+    </div>
+    <div class="controls">
+      <div class="seg" role="group" id="langSeg">
+        <button type="button" data-lang="tr" aria-pressed="false" lang="tr">TR</button>
+        <button type="button" data-lang="en" aria-pressed="false" lang="en">EN</button>
+      </div>
+      <button type="button" class="icon-btn" id="themeBtn"></button>
+    </div>
+  </header>
+
+  <section class="drop" id="drop">
+    <div class="drop-text">
+      <strong data-i="dropTitle"></strong>
+      <span class="cap" data-i="dropHint"></span>
+    </div>
+    <label class="btn" id="pickLabel"><span data-i="pick"></span><input type="file" id="pick" class="sr" multiple accept=".xml,.json,.pdf,.zip,.p7m,text/xml,application/xml,application/json,application/pdf,application/zip"></label>
+  </section>
+  <p class="cap formats"><strong data-i="formats"></strong>: UBL 2.1 (UBL-TR, PEPPOL BIS, XRechnung, EN 16931) · UN/CEFACT CII (Factur-X, ZUGFeRD) · FatturaPA · CFDI · NF-e · India e-Invoice</p>
+
+  <div class="chips" id="chips"></div>
+  <div id="notices"></div>
+
+  <div class="actions" id="actions" hidden>
+    <button type="button" class="btn ghost" id="copySummary" data-i="copySummary"></button>
+    <button type="button" class="btn ghost" id="copyLines" data-i="copyLines"></button>
+  </div>
+
+  <article class="sheet" id="sheet"></article>
+</main>
+<div class="toast" id="toast" role="status" aria-live="polite"><span></span></div>
+
+<script>
+// ===================== i18n =====================
+let lang = 'en';
+const D = {
+  title: ['Fatura Okuyucu', 'Invoice Viewer'],
+  subtitle: ['Dünyadaki e-fatura biçimlerini okunabilir fatura olarak açar. Dosyalar bu sayfanın dışına çıkmaz.', 'Opens e-invoice files from around the world as a readable invoice. Your files never leave this page.'],
+  dropTitle: ['Fatura dosyasını buraya bırak', 'Drop your invoice file here'],
+  dropHint: ['XML, JSON, PDF (Factur-X / ZUGFeRD) veya ZIP. Birden fazla dosya seçebilir ya da metin yapıştırabilirsin (Ctrl+V).', 'XML, JSON, PDF (Factur-X / ZUGFeRD) or ZIP. Select several files or paste text (Ctrl+V).'],
+  pick: ['Dosya seç', 'Choose files'],
+  formats: ['Desteklenen biçimler', 'Supported formats'],
+  copySummary: ['Özeti kopyala', 'Copy summary'],
+  copyLines: ['Kalemleri kopyala (Excel için)', 'Copy line items (for Excel)'],
+  copiedSummary: ['Özet kopyalandı', 'Summary copied'],
+  copiedLines: ['Kalemler kopyalandı. Excel\'e yapıştırabilirsin.', 'Line items copied. Paste them into Excel.'],
+  copyFail: ['Kopyalanamadı. Bu görünüm panoya yazmaya izin vermiyor.', 'Could not copy. This view does not allow writing to the clipboard.'],
+  remove: ['{0} dosyasını listeden kaldır', 'Remove {0} from the list'],
+  toLight: ['Aydınlık temaya geç', 'Switch to light theme'],
+  toDark: ['Karanlık temaya geç', 'Switch to dark theme'],
+  // errors
+  badData: ['Dosya bozuk ya da okunamadı. XML veya JSON olduğundan emin ol.', 'The file is damaged or unreadable. Make sure it is XML or JSON.'],
+  notInvoice: ['Bu dosya desteklenen bir fatura biçiminde değil (kök öğe: {0}).', 'This file is not a supported invoice format (root element: {0}).'],
+  appResponse: ['Bu dosya bir uygulama yanıtı (kabul/ret bildirimi), fatura değil.', 'This file is an application response (accept/reject notice), not an invoice.'],
+  zugferd1: ['ZUGFeRD 1.0 biçimi desteklenmiyor. ZUGFeRD 2 ve sonrası (Factur-X) açılır.', 'ZUGFeRD 1.0 is not supported. ZUGFeRD 2 and later (Factur-X) open fine.'],
+  pdfNoXml: ['Bu PDF içinde gömülü fatura XML\'i yok. PDF\'in görüntüsünden fatura okunamaz, XML dosyasını kullan.', 'This PDF has no embedded invoice XML. Invoices cannot be read from a PDF image, use the XML file.'],
+  zipEmpty: ['ZIP içinde okunabilir fatura dosyası yok.', 'The ZIP contains no readable invoice file.'],
+  zipFail: ['ZIP dosyası açılamadı.', 'The ZIP file could not be opened.'],
+  noDecomp: ['Tarayıcın sıkıştırılmış dosyaları açmayı desteklemiyor. Güncel bir tarayıcı kullan.', 'Your browser cannot open compressed files. Use an up-to-date browser.'],
+  readFail: ['Dosya okunamadı.', 'The file could not be read.'],
+  tooBig: ['Dosya ya da açılmış içeriği çok büyük (en çok 80 MB).', 'The file, or its unpacked content, is too large (80 MB at most).'],
+  unsafeXml: ['Bu XML dosyası DOCTYPE/ENTITY tanımı içeriyor. Fatura dosyalarında bulunmaz, güvenlik için açılmadı.', 'This XML file contains a DOCTYPE/ENTITY declaration. Invoices do not use them, so it was not opened for safety.'],
+  // invoice labels
+  seller: ['Satıcı', 'Seller'], buyer: ['Alıcı', 'Buyer'], buyerTR: ['Sayın', 'Buyer'],
+  taxOffice: ['Vergi Dairesi', 'Tax office'],
+  no: ['Sıra', 'No.'], item: ['Mal / Hizmet', 'Item'], qty: ['Miktar', 'Qty'], unit: ['Birim', 'Unit'],
+  price: ['Birim Fiyat', 'Unit price'], disc: ['İskonto', 'Discount'], taxCol: ['Vergi', 'Tax'], vat: ['KDV', 'VAT'],
+  amount: ['Tutar', 'Amount'], code: ['Kod', 'Code'], taxRate: ['Vergi Oranı', 'Tax rate'], taxAmt: ['Vergi Tutarı', 'Tax amount'],
+  unnamed: ['(adsız kalem)', '(unnamed item)'], noName: ['(isim yok)', '(no name)'], noItems: ['Bu dosyada fatura kalemi bulunamadı.', 'No line items found in this file.'],
+  notes: ['Notlar', 'Notes'], payment: ['Ödeme', 'Payment'], exempt: ['Vergi İstisna / Muafiyet', 'Tax exemption'], dueShort: ['Vade', 'Due'],
+  invoiceNo: ['Fatura No', 'Invoice no.'], date: ['Tarih', 'Date'], due: ['Vade Tarihi', 'Due date'], currency: ['Para Birimi', 'Currency'],
+  ettn: ['ETTN', 'UUID (ETTN)'], uuid: ['UUID', 'UUID'], order: ['Sipariş No', 'Order no.'], contract: ['Sözleşme No', 'Contract no.'],
+  despatch: ['İrsaliye No', 'Despatch no.'], billing: ['İlgili Fatura', 'Original invoice'], buyerRef: ['Alıcı Referansı', 'Buyer reference'],
+  project: ['Proje', 'Project'], period: ['Dönem', 'Period'], payRef: ['Ödeme Referansı', 'Payment reference'],
+  accessKey: ['Erişim Anahtarı', 'Access key'], protocol: ['Protokol No', 'Protocol no.'], irn: ['IRN', 'IRN'], ack: ['Onay No', 'Ack. no.'],
+  issuePlace: ['Düzenleme Yeri', 'Place of issue'], rate: ['Kur', 'Exchange rate'], transmission: ['Gönderim No', 'Transmission no.'],
+  lineSum: ['Mal/Hizmet Toplam Tutarı', 'Subtotal'], allowance: ['Toplam İskonto', 'Total discounts'], charge: ['Toplam Artırım', 'Total charges'],
+  taxExcl: ['Vergiler Hariç Toplam', 'Total excluding tax'], taxIncl: ['Vergiler Dahil Toplam', 'Total including tax'],
+  withholding: ['Tevkifat', 'Withholding'], rounding: ['Yuvarlama', 'Rounding'], prepaid: ['Ödenmiş Tutar', 'Prepaid amount'],
+  payable: ['Ödenecek Tutar', 'Amount due'], calc: ['Hesaplanan', ''], included: ['dahil', 'included'],
+  words: ['Yalnız:', 'Amount in words:'], file: ['Dosya', 'File'], formatLbl: ['Biçim', 'Format'],
+  sigYes: ['Dosyada imza kaydı var. Bu araç imzayı doğrulamaz.', 'The file contains a signature. This tool does not verify it.'],
+  sigNo: ['Dosyada imza kaydı bulunamadı.', 'No signature found in the file.'],
+  eInvoice: ['e-Fatura', 'e-Invoice'], eArchive: ['e-Arşiv Fatura', 'e-Archive Invoice'], copy: ['Kopya', 'Copy'],
+};
+const t = (k, ...a) => { const e = D[k]; if (!e) return k; return e[lang === 'tr' ? 0 : 1].replace(/\{(\d+)\}/g, (_, i) => a[i]); };
+const pick = (p) => (Array.isArray(p) ? p[lang === 'tr' ? 0 : 1] : p == null ? '' : String(p));
+
+const KINDS = {
+  inv: ['Fatura', 'Invoice'], credit: ['Alacak Dekontu', 'Credit note'], debit: ['Borç Dekontu', 'Debit note'],
+  corrected: ['Düzeltme Faturası', 'Corrected invoice'], prepay: ['Avans Faturası', 'Prepayment invoice'],
+  selfbill: ['Kendi Adına Fatura', 'Self-billed invoice'], other: ['Belge', 'Document'],
+};
+const UNITS = {
+  C62: ['Adet', 'Piece'], H87: ['Adet', 'Piece'], NIU: ['Adet', 'Number'], PCE: ['Adet', 'Piece'], EA: ['Adet', 'Each'], KGM: ['Kg', 'kg'], GRM: ['Gr', 'g'],
+  LTR: ['Lt', 'L'], MTR: ['m', 'm'], MTK: ['m²', 'm²'], MTQ: ['m³', 'm³'], CMT: ['cm', 'cm'], PA: ['Paket', 'Pack'], BX: ['Kutu', 'Box'], SET: ['Set', 'Set'],
+  HUR: ['Saat', 'Hour'], DAY: ['Gün', 'Day'], MON: ['Ay', 'Month'], ANN: ['Yıl', 'Year'], KWH: ['kWh', 'kWh'], PR: ['Çift', 'Pair'], DZN: ['Düzine', 'Dozen'],
+  TNE: ['Ton', 'Tonne'], MIN: ['Dk', 'Min'], E48: ['Hizmet', 'Service'], LS: ['Götürü', 'Lump sum'],
+};
+const PAY_UN = {
+  '1': ['Belirtilmemiş', 'Not defined'], '10': ['Nakit', 'Cash'], '20': ['Çek', 'Cheque'], '30': ['Havale / EFT', 'Credit transfer'],
+  '31': ['Borçlandırma havalesi', 'Debit transfer'], '42': ['Banka hesabına', 'Payment to bank account'], '48': ['Banka kartı', 'Bank card'],
+  '49': ['Otomatik ödeme', 'Direct debit'], '54': ['Kredi kartı', 'Credit card'], '57': ['Daimi talimat', 'Standing agreement'],
+  '58': ['SEPA havalesi', 'SEPA credit transfer'], '59': ['SEPA otomatik ödeme', 'SEPA direct debit'], 'ZZZ': ['Diğer', 'Other'],
+};
+const PAY_IT = {
+  MP01: ['Nakit', 'Cash'], MP02: ['Çek', 'Cheque'], MP03: ['Banka çeki', 'Banker\'s draft'], MP05: ['Havale', 'Bank transfer'], MP08: ['Ödeme kartı', 'Payment card'],
+  MP12: ['RIBA', 'RIBA'], MP16: ['Otomatik ödeme', 'Direct debit'], MP19: ['SEPA otomatik ödeme', 'SEPA direct debit'], MP23: ['PagoPA', 'PagoPA'],
+};
+const PAY_MX = {
+  '01': ['Nakit', 'Cash'], '02': ['Çek', 'Cheque'], '03': ['Havale', 'Bank transfer'], '04': ['Kredi kartı', 'Credit card'], '28': ['Banka kartı', 'Debit card'],
+  '99': ['Tanımlanacak', 'To be defined'],
+};
+const PAY_BR = {
+  '01': ['Nakit', 'Cash'], '02': ['Çek', 'Cheque'], '03': ['Kredi kartı', 'Credit card'], '04': ['Banka kartı', 'Debit card'], '15': ['Boleto', 'Bank slip (boleto)'],
+  '16': ['Banka yatırması', 'Bank deposit'], '17': ['PIX', 'PIX'], '90': ['Ödemesiz', 'No payment'], '99': ['Diğer', 'Other'],
+};
+const TR_PROFILES = new Set(['TEMELFATURA', 'TICARIFATURA', 'EARSIVFATURA', 'IHRACAT', 'YOLCUBERABERFATURA', 'KAMU', 'HKS', 'ENERJI', 'ILAC_TIBBICIHAZ', 'IDIS', 'OZELFATURA']);
+const TR_PROFILE_NAMES = {
+  TEMELFATURA: ['Temel Fatura', 'Basic invoice'], TICARIFATURA: ['Ticari Fatura', 'Commercial invoice'], IHRACAT: ['İhracat', 'Export'],
+  YOLCUBERABERFATURA: ['Yolcu Beraber', 'Tax-free passenger'], KAMU: ['Kamu', 'Public sector'], ENERJI: ['Enerji', 'Energy'], HKS: ['HKS', 'HKS'],
+};
+const TR_TYPES = {
+  SATIS: ['Satış', 'Sale'], IADE: ['İade', 'Return'], TEVKIFAT: ['Tevkifat', 'Withholding'], ISTISNA: ['İstisna', 'Exempt'],
+  OZELMATRAH: ['Özel Matrah', 'Special base'], IHRACKAYITLI: ['İhraç Kayıtlı', 'Export-registered'], SGK: ['SGK', 'Social security'],
+  KOMISYONCU: ['Komisyoncu', 'Commission agent'], HKSSATIS: ['HKS Satış', 'HKS sale'], HKSKOMISYONCU: ['HKS Komisyoncu', 'HKS commission agent'],
+  TEVKIFATIADE: ['Tevkifat İade', 'Withholding return'],
+};
+const KIND_BY_1001 = {
+  '380': 'inv', '388': 'inv', '326': 'inv', '751': 'inv', '381': 'credit', '261': 'credit', '262': 'credit', '396': 'credit', '81': 'credit', '458': 'credit',
+  '383': 'debit', '384': 'corrected', '386': 'prepay', '389': 'selfbill',
+};
+const CURWORDS = {
+  TRY: [['Türk Lirası', 'Kuruş'], ['Turkish Lira', 'Kurus']], USD: [['Amerikan Doları', 'Sent'], ['US Dollars', 'Cents']],
+  EUR: [['Avro', 'Sent'], ['Euros', 'Cents']], GBP: [['İngiliz Sterlini', 'Peni'], ['Pounds Sterling', 'Pence']],
+};
+
+// ===================== formatting =====================
+const NFC = {};
+const nf = (min, max) => { const k = lang + min + max; return NFC[k] || (NFC[k] = new Intl.NumberFormat(lang === 'tr' ? 'tr-TR' : 'en-US', { minimumFractionDigits: min, maximumFractionDigits: max })); };
+const money = (v) => (v == null ? '' : nf(2, 2).format(v));
+const priceF = (v) => (v == null ? '' : nf(2, 4).format(v));
+const qtyF = (v) => (v == null ? '' : nf(0, 4).format(v));
+const pct = (p) => (p == null ? '' : lang === 'tr' ? '%' + nf(0, 4).format(p) : nf(0, 4).format(p) + '%');
+const curLabel = (c) => (c === 'TRY' || c === 'TRL' ? 'TL' : c || '');
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const fdate = (iso) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
+  if (!m) return iso || '';
+  return lang === 'tr' ? m[3] + '.' + m[2] + '.' + m[1] : parseInt(m[3], 10) + ' ' + MONTHS[parseInt(m[2], 10) - 1] + ' ' + m[1];
+};
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const r2 = (v) => Math.round(v * 100) / 100;
+const fmtIban = (s) => (/^[A-Za-z]{2}\d{2}[A-Za-z0-9\s]+$/.test(s || '') ? String(s).replace(/\s+/g, '').replace(/(.{4})/g, '$1 ').trim() : s);
+const unitName = (u) => (u ? (UNITS[u] ? pick(UNITS[u]) : u) : '');
+
+function parseDT(s) {
+  s = (s || '').trim();
+  let m;
+  if ((m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}:\d{2}))?/.exec(s))) return { date: m[1] + '-' + m[2] + '-' + m[3], time: m[4] || '' };
+  if ((m = /^(\d{4})(\d{2})(\d{2})(?:T?(\d{2})(\d{2}))?/.exec(s))) return { date: m[1] + '-' + m[2] + '-' + m[3], time: m[4] ? m[4] + ':' + m[5] : '' };
+  if ((m = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(s))) return { date: m[3] + '-' + m[2] + '-' + m[1], time: '' };
+  return { date: s, time: '' };
+}
+
+// number words
+const TR1 = ['', 'bir', 'iki', 'üç', 'dört', 'beş', 'altı', 'yedi', 'sekiz', 'dokuz'];
+const TR10 = ['', 'on', 'yirmi', 'otuz', 'kırk', 'elli', 'altmış', 'yetmiş', 'seksen', 'doksan'];
+const TRS = ['', 'bin', 'milyon', 'milyar', 'trilyon'];
+function trBelow(n) {
+  const h = Math.floor(n / 100), tn = Math.floor((n % 100) / 10), o = n % 10;
+  let s = '';
+  if (h) s += (h > 1 ? TR1[h] + ' ' : '') + 'yüz ';
+  if (tn) s += TR10[tn] + ' ';
+  if (o) s += TR1[o] + ' ';
+  return s.trim();
+}
+function trWords(n) {
+  if (n === 0) return 'sıfır';
+  const parts = [];
+  let i = 0;
+  while (n > 0 && i < TRS.length) {
+    const c = n % 1000;
+    if (c) { let w = trBelow(c); if (i === 1 && c === 1) w = ''; parts.unshift((w + ' ' + TRS[i]).trim()); }
+    n = Math.floor(n / 1000); i++;
+  }
+  return parts.join(' ');
+}
+const EN1 = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+const EN10 = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+const ENS = ['', 'thousand', 'million', 'billion', 'trillion'];
+function enBelow(n) {
+  let s = '';
+  if (n >= 100) { s += EN1[Math.floor(n / 100)] + ' hundred'; n %= 100; if (n) s += ' '; }
+  if (n >= 20) { s += EN10[Math.floor(n / 10)]; if (n % 10) s += '-' + EN1[n % 10]; } else if (n > 0) s += EN1[n];
+  return s;
+}
+function enWords(n) {
+  if (n === 0) return 'zero';
+  const parts = [];
+  let i = 0;
+  while (n > 0 && i < ENS.length) {
+    const c = n % 1000;
+    if (c) parts.unshift((enBelow(c) + ' ' + ENS[i]).trim());
+    n = Math.floor(n / 1000); i++;
+  }
+  return parts.join(' ');
+}
+const capWords = (s) => s.split(' ').map((x) => x.charAt(0).toLocaleUpperCase(lang === 'tr' ? 'tr' : 'en') + x.slice(1)).join(' ');
+function amountInWords(v, cur) {
+  const e = CURWORDS[cur === 'TRL' ? 'TRY' : cur];
+  if (!e || v == null || !isFinite(v) || Math.abs(v) >= 1e15) return '';
+  const names = lang === 'tr' ? e[0] : e[1];
+  const cents = Math.round(Math.abs(v) * 100);
+  const major = Math.floor(cents / 100), minor = cents % 100;
+  const w = lang === 'tr' ? trWords : enWords;
+  let s = capWords(w(major)) + ' ' + names[0];
+  if (minor) s += (lang === 'tr' ? ' ' : ' and ') + capWords(w(minor)) + ' ' + names[1];
+  return s;
+}
+
+// ===================== xml helpers =====================
+class AppErr extends Error { constructor(k, ...a) { super(k); this.k = k; this.a = a; } }
+const kids = (el, n) => (el ? Array.from(el.children).filter((c) => c.localName === n) : []);
+const kid = (el, n) => kids(el, n)[0] || null;
+const at = (el, path) => { let c = el; for (const p of path.split('/')) { c = kid(c, p); if (!c) return null; } return c; };
+const tx = (el, path) => { const n = path ? at(el, path) : el; return n ? (n.textContent || '').trim() : ''; };
+const num = (el, path) => { const s = tx(el, path); if (s === '') return null; const v = parseFloat(s); return isFinite(v) ? v : null; };
+const attr = (el, a) => (el ? el.getAttribute(a) || '' : '');
+const desc1 = (el, n) => (el ? el.getElementsByTagNameNS('*', n)[0] || null : null);
+const descs = (el, n) => (el ? Array.from(el.getElementsByTagNameNS('*', n)) : []);
+const hasDsig = (el) => !!(el && el.getElementsByTagNameNS('http://www.w3.org/2000/09/xmldsig#', 'Signature').length);
+const N = (v) => { if (v == null || v === '') return null; const x = Number(v); return isFinite(x) ? x : null; };
+const sum = (arr, f) => arr.reduce((s, x) => s + (f(x) || 0), 0);
+const uniq = (arr) => Array.from(new Set(arr.filter(Boolean)));
+
+function parseXml(text) {
+  let doc;
+  try { doc = new DOMParser().parseFromString(text, 'application/xml'); } catch (e) { throw new AppErr('badData'); }
+  if (!doc || !doc.documentElement || doc.getElementsByTagName('parsererror').length) throw new AppErr('badData');
+  return doc;
+}
+const emptyTotals = () => ({ lineSum: null, allowance: null, charge: null, taxExcl: null, tax: null, taxIncl: null, rounding: null, prepaid: null, payable: null });
+const baseInv = (format) => ({
+  format, kind: 'inv', typeNote: '', trProfile: '', id: '', date: '', time: '', due: '', cur: '', refs: [], seller: null, buyer: null,
+  lines: [], taxes: [], withholding: [], totals: emptyTotals(), payments: [], terms: [], notes: [], exemptions: [], signed: false,
+});
+const ref = (k, v, d, opt) => (v ? Object.assign({ k, v, d: d || '' }, opt || {}) : null);
+
+// ===================== UBL 2.1 (UBL-TR, PEPPOL, XRechnung, EN 16931 ...) =====================
+function ublTax(sub, cat, isTR) {
+  const sch = kid(cat, 'TaxScheme');
+  const name = tx(sch, 'Name') || tx(sch, 'ID') || tx(cat, 'Name');
+  const code = tx(sch, 'TaxTypeCode');
+  const vat = code === '0015' || /^(kdv|vat|iva|mwst|ust|tva|btw|moms)$/i.test(name) || /^vat$/i.test(tx(sch, 'ID'));
+  return {
+    name, kind: vat ? 'vat' : 'other', percent: sub ? (num(sub, 'Percent') ?? num(cat, 'Percent')) : num(cat, 'Percent'),
+    base: sub ? num(sub, 'TaxableAmount') : null, amount: sub ? num(sub, 'TaxAmount') : null, cat: isTR ? '' : tx(cat, 'ID'),
+    exemption: [tx(cat, 'TaxExemptionReason'), tx(cat, 'TaxExemptionReasonCode')].filter(Boolean).join(' · '),
+  };
+}
+function ublParty(wrap, isTR) {
+  const P = kid(wrap, 'Party');
+  if (!P) return null;
+  const ids = [];
+  const push = (l, v) => { v = (v || '').trim(); if (v && !ids.some((i) => i.v === v)) ids.push({ l, v }); };
+  kids(P, 'PartyIdentification').forEach((i) => { const e = kid(i, 'ID'); push(attr(e, 'schemeID') || 'ID', e ? e.textContent : ''); });
+  push('VAT ID', tx(P, 'PartyTaxScheme/CompanyID'));
+  const lc = at(P, 'PartyLegalEntity/CompanyID');
+  if (lc) push('Reg. no.' + (attr(lc, 'schemeID') ? ' (' + attr(lc, 'schemeID') + ')' : ''), lc.textContent);
+  const ep = kid(P, 'EndpointID');
+  if (ep) push('Endpoint' + (attr(ep, 'schemeID') ? ' (' + attr(ep, 'schemeID') + ')' : ''), ep.textContent);
+  const person = [tx(P, 'Person/FirstName'), tx(P, 'Person/MiddleName'), tx(P, 'Person/FamilyName')].filter(Boolean).join(' ');
+  const legal = tx(P, 'PartyLegalEntity/RegistrationName');
+  const pn = tx(P, 'PartyName/Name');
+  const name = isTR ? pn || person : legal || pn || person;
+  const sub = isTR ? (pn && person && pn !== person ? person : '') : (legal && pn && legal !== pn ? pn : '');
+  const a = kid(P, 'PostalAddress');
+  const lines = [];
+  if (a) {
+    const bn = tx(a, 'BuildingNumber');
+    const l1 = [tx(a, 'StreetName'), tx(a, 'BuildingName'), bn ? (isTR ? 'No: ' + bn : bn) : '', tx(a, 'Room') ? (isTR ? 'Kapı: ' : '') + tx(a, 'Room') : ''].filter(Boolean).join(' ');
+    const l2 = [tx(a, 'PostalZone'), [tx(a, 'CitySubdivisionName'), tx(a, 'CityName')].filter(Boolean).join(' / '), tx(a, 'CountrySubentity')].filter(Boolean).join(' ');
+    [l1, tx(a, 'AdditionalStreetName'), l2, tx(a, 'Country/Name') || tx(a, 'Country/IdentificationCode')].forEach((x) => { if (x) lines.push(x); });
+  }
+  return {
+    name, sub, ids, taxOffice: isTR ? tx(P, 'PartyTaxScheme/TaxScheme/Name') : '', lines,
+    tel: tx(P, 'Contact/Telephone'), mail: tx(P, 'Contact/ElectronicMail'), web: tx(P, 'WebsiteURI'), contact: tx(P, 'Contact/Name'),
+  };
+}
+function ubl(root) {
+  const rn = root.localName;
+  const credit = rn === 'CreditNote', debit = rn === 'DebitNote';
+  const custom = tx(root, 'CustomizationID'), profile = tx(root, 'ProfileID');
+  const isTR = /^TR\d/i.test(custom) || TR_PROFILES.has(profile);
+  let format = 'UBL 2.1';
+  const c = custom.toLowerCase();
+  if (isTR) format = 'UBL-TR';
+  else if (c.includes('xrechnung')) format = 'XRechnung (UBL)';
+  else if (c.includes('peppol')) format = 'PEPPOL BIS 3.0';
+  else if (c.includes('en16931')) format = 'EN 16931 (UBL)';
+  else if (c.includes('oioubl')) format = 'OIOUBL';
+  else if (c.includes('nlcius')) format = 'NLCIUS (UBL)';
+  const inv = baseInv(format);
+  inv.cur = tx(root, 'DocumentCurrencyCode') || (isTR ? 'TRY' : '');
+  const typeCode = tx(root, credit ? 'CreditNoteTypeCode' : debit ? 'DebitNoteTypeCode' : 'InvoiceTypeCode');
+  if (isTR) {
+    inv.trProfile = profile;
+    inv.kind = /IADE/.test(typeCode) ? 'credit' : 'inv';
+    const parts = [];
+    if (profile !== 'EARSIVFATURA' && TR_PROFILE_NAMES[profile]) parts.push(TR_PROFILE_NAMES[profile]);
+    else if (profile !== 'EARSIVFATURA' && profile) parts.push(profile);
+    if (typeCode) parts.push(TR_TYPES[typeCode] || typeCode);
+    inv.typeParts = parts;
+  } else {
+    inv.kind = credit ? 'credit' : debit ? 'debit' : KIND_BY_1001[typeCode] || 'inv';
+    inv.typeNote = typeCode;
+  }
+  inv.copy = tx(root, 'CopyIndicator').toLowerCase() === 'true';
+  inv.id = tx(root, 'ID');
+  const dt = parseDT(tx(root, 'IssueDate') + (tx(root, 'IssueTime') ? 'T' + tx(root, 'IssueTime') : ''));
+  inv.date = dt.date; inv.time = dt.time;
+  inv.due = tx(root, 'DueDate');
+  inv.notes = kids(root, 'Note').map((n) => n.textContent.trim()).filter(Boolean);
+  inv.seller = ublParty(kid(root, 'AccountingSupplierParty'), isTR);
+  inv.buyer = ublParty(kid(root, 'AccountingCustomerParty'), isTR);
+
+  const pushRef = (r) => { if (r) inv.refs.push(r); };
+  pushRef(ref(isTR ? 'ettn' : 'uuid', tx(root, 'UUID')));
+  pushRef(ref('order', tx(root, 'OrderReference/ID'), tx(root, 'OrderReference/IssueDate'), { dd: true }));
+  pushRef(ref('contract', tx(root, 'ContractDocumentReference/ID')));
+  pushRef(ref('despatch', kids(root, 'DespatchDocumentReference').map((d) => tx(d, 'ID')).filter(Boolean).join(', ')));
+  pushRef(ref('billing', kids(root, 'BillingReference').map((b) => tx(b, 'InvoiceDocumentReference/ID')).filter(Boolean).join(', ')));
+  pushRef(ref('buyerRef', tx(root, 'BuyerReference')));
+  pushRef(ref('project', tx(root, 'ProjectReference/ID')));
+  const ps = tx(root, 'InvoicePeriod/StartDate'), pe = tx(root, 'InvoicePeriod/EndDate');
+  if (ps || pe) pushRef({ k: 'period', v: ps, d: pe, vd: true, dd: true, range: true });
+
+  const lineTag = credit ? 'CreditNoteLine' : debit ? 'DebitNoteLine' : 'InvoiceLine';
+  const qtyTag = credit ? 'CreditedQuantity' : debit ? 'DebitedQuantity' : 'InvoicedQuantity';
+  inv.lines = kids(root, lineTag).map((l) => {
+    const ac = kids(l, 'AllowanceCharge').map((a) => ({ charge: tx(a, 'ChargeIndicator').toLowerCase() === 'true', amount: num(a, 'Amount') || 0, f: num(a, 'MultiplierFactorNumeric') }));
+    let taxes = kids(l, 'TaxTotal').flatMap((tt) => kids(tt, 'TaxSubtotal')).map((s) => ublTax(s, kid(s, 'TaxCategory'), isTR));
+    if (!taxes.length) {
+      const cat = at(l, 'Item/ClassifiedTaxCategory');
+      if (cat) taxes = [ublTax(null, cat, isTR)];
+    }
+    const dsc = ac.find((a) => !a.charge && a.f != null);
+    return {
+      n: tx(l, 'ID'), name: tx(l, 'Item/Name'), desc: tx(l, 'Item/Description'), code: tx(l, 'Item/SellersItemIdentification/ID'),
+      qty: num(l, qtyTag), unit: attr(kid(l, qtyTag), 'unitCode'), price: num(l, 'Price/PriceAmount'), net: num(l, 'LineExtensionAmount'),
+      discount: sum(ac.filter((a) => !a.charge), (a) => a.amount), discountPct: dsc ? dsc.f * 100 : null,
+      charge: sum(ac.filter((a) => a.charge), (a) => a.amount), taxes,
+    };
+  });
+  const tts = kids(root, 'TaxTotal');
+  let chosen = tts.filter((tt) => { const a = kid(tt, 'TaxAmount'); return !inv.cur || !attr(a, 'currencyID') || attr(a, 'currencyID') === inv.cur; });
+  if (!chosen.length) chosen = tts.slice(0, 1);
+  inv.taxes = chosen.flatMap((tt) => kids(tt, 'TaxSubtotal')).map((s) => ublTax(s, kid(s, 'TaxCategory'), isTR));
+  inv.withholding = kids(root, 'WithholdingTaxTotal').flatMap((tt) => kids(tt, 'TaxSubtotal')).map((s) => ublTax(s, kid(s, 'TaxCategory'), isTR));
+  const lm = kid(root, 'LegalMonetaryTotal');
+  inv.totals = {
+    lineSum: num(lm, 'LineExtensionAmount'), allowance: num(lm, 'AllowanceTotalAmount'), charge: num(lm, 'ChargeTotalAmount'),
+    taxExcl: num(lm, 'TaxExclusiveAmount'), tax: chosen.length ? sum(chosen, (tt) => num(tt, 'TaxAmount')) : null, taxIncl: num(lm, 'TaxInclusiveAmount'),
+    rounding: num(lm, 'PayableRoundingAmount'), prepaid: num(lm, 'PrepaidAmount'), payable: num(lm, 'PayableAmount'),
+  };
+  inv.payments = kids(root, 'PaymentMeans').map((p) => ({
+    means: PAY_UN[tx(p, 'PaymentMeansCode')] || tx(p, 'PaymentMeansCode'), due: tx(p, 'PaymentDueDate'), ref: tx(p, 'PaymentID'),
+    iban: tx(p, 'PayeeFinancialAccount/ID'), bank: tx(p, 'PayeeFinancialAccount/FinancialInstitutionBranch/Name') || tx(p, 'PayeeFinancialAccount/FinancialInstitutionBranch/ID'),
+  })).filter((p) => p.iban || p.due || p.means);
+  inv.terms = kids(root, 'PaymentTerms').map((p) => tx(p, 'Note')).filter(Boolean);
+  inv.exemptions = uniq(inv.taxes.concat(inv.lines.flatMap((l) => l.taxes)).map((s) => s.exemption));
+  inv.signed = hasDsig(root);
+  return inv;
+}
+
+// ===================== UN/CEFACT CII (Factur-X, ZUGFeRD 2, XRechnung CII) =====================
+function ciiParty(p) {
+  if (!p) return null;
+  const ids = [];
+  const push = (l, v) => { v = (v || '').trim(); if (v && !ids.some((i) => i.v === v)) ids.push({ l, v }); };
+  kids(p, 'ID').forEach((e) => push('ID', e.textContent));
+  kids(p, 'GlobalID').forEach((e) => push(attr(e, 'schemeID') || 'ID', e.textContent));
+  const lo = at(p, 'SpecifiedLegalOrganization/ID');
+  if (lo) push('Reg. no.' + (attr(lo, 'schemeID') ? ' (' + attr(lo, 'schemeID') + ')' : ''), lo.textContent);
+  kids(p, 'SpecifiedTaxRegistration').forEach((r) => {
+    const e = kid(r, 'ID'); const s = attr(e, 'schemeID');
+    push(s === 'VA' ? 'VAT ID' : s === 'FC' ? 'Tax no.' : s || 'Tax ID', e ? e.textContent : '');
+  });
+  const a = kid(p, 'PostalTradeAddress');
+  const lines = [];
+  if (a) {
+    [tx(a, 'LineOne'), tx(a, 'LineTwo'), tx(a, 'LineThree'), [tx(a, 'PostcodeCode'), tx(a, 'CityName'), tx(a, 'CountrySubDivisionName')].filter(Boolean).join(' '), tx(a, 'CountryID')].forEach((x) => { if (x) lines.push(x); });
+  }
+  const c = kid(p, 'DefinedTradeContact');
+  return {
+    name: tx(p, 'Name'), sub: '', ids, taxOffice: '', lines, tel: tx(c, 'TelephoneUniversalCommunication/CompleteNumber'),
+    mail: tx(c, 'EmailURIUniversalCommunication/URIID'), web: '', contact: tx(c, 'PersonName'),
+  };
+}
+function cii(root, ctx) {
+  const guide = tx(root, 'ExchangedDocumentContext/GuidelineSpecifiedDocumentContextParameter/ID').toLowerCase();
+  let format = 'UN/CEFACT CII';
+  if (guide.includes('xrechnung')) format = 'XRechnung (CII)';
+  else if (guide.includes('zugferd') || guide.includes('factur-x') || guide.includes('facturx') || ctx.fromPdf) format = 'Factur-X / ZUGFeRD';
+  else if (guide.includes('en16931')) format = 'EN 16931 (CII)';
+  const inv = baseInv(format);
+  const doc = kid(root, 'ExchangedDocument'), trx = kid(root, 'SupplyChainTradeTransaction');
+  const ha = kid(trx, 'ApplicableHeaderTradeAgreement'), hd = kid(trx, 'ApplicableHeaderTradeDelivery'), hs = kid(trx, 'ApplicableHeaderTradeSettlement');
+  const typeCode = tx(doc, 'TypeCode');
+  inv.kind = KIND_BY_1001[typeCode] || 'inv';
+  inv.typeNote = typeCode;
+  inv.id = tx(doc, 'ID');
+  const dt = parseDT(tx(doc, 'IssueDateTime/DateTimeString'));
+  inv.date = dt.date; inv.time = dt.time;
+  inv.cur = tx(hs, 'InvoiceCurrencyCode');
+  inv.notes = kids(doc, 'IncludedNote').map((n) => tx(n, 'Content')).filter(Boolean);
+  inv.seller = ciiParty(kid(ha, 'SellerTradeParty'));
+  inv.buyer = ciiParty(kid(ha, 'BuyerTradeParty'));
+  const pushRef = (r) => { if (r) inv.refs.push(r); };
+  pushRef(ref('buyerRef', tx(ha, 'BuyerReference')));
+  pushRef(ref('order', tx(ha, 'BuyerOrderReferencedDocument/IssuerAssignedID')));
+  pushRef(ref('contract', tx(ha, 'ContractReferencedDocument/IssuerAssignedID')));
+  pushRef(ref('despatch', tx(hd, 'DespatchAdviceReferencedDocument/IssuerAssignedID')));
+  pushRef(ref('billing', tx(hs, 'InvoiceReferencedDocument/IssuerAssignedID')));
+  pushRef(ref('payRef', tx(hs, 'PaymentReference')));
+  const ps = parseDT(tx(hs, 'BillingSpecifiedPeriod/StartDateTime/DateTimeString')).date, pe = parseDT(tx(hs, 'BillingSpecifiedPeriod/EndDateTime/DateTimeString')).date;
+  if (ps || pe) pushRef({ k: 'period', v: ps, d: pe, vd: true, dd: true, range: true });
+  const ciiTax = (x) => {
+    const code = tx(x, 'TypeCode');
+    return {
+      name: code || 'VAT', kind: !code || /^vat$/i.test(code) ? 'vat' : 'other', percent: num(x, 'RateApplicablePercent'), base: num(x, 'BasisAmount'),
+      amount: num(x, 'CalculatedAmount'), cat: tx(x, 'CategoryCode'), exemption: [tx(x, 'ExemptionReason'), tx(x, 'ExemptionReasonCode')].filter(Boolean).join(' · '),
+    };
+  };
+  inv.lines = kids(trx, 'IncludedSupplyChainTradeLineItem').map((l) => {
+    const q = at(l, 'SpecifiedLineTradeDelivery/BilledQuantity');
+    const set = kid(l, 'SpecifiedLineTradeSettlement');
+    const net = num(l, 'SpecifiedLineTradeAgreement/NetPriceProductTradePrice/ChargeAmount');
+    const gross = num(l, 'SpecifiedLineTradeAgreement/GrossPriceProductTradePrice/ChargeAmount');
+    return {
+      n: tx(l, 'AssociatedDocumentLineDocument/LineID'), name: tx(l, 'SpecifiedTradeProduct/Name'), desc: tx(l, 'SpecifiedTradeProduct/Description'),
+      code: tx(l, 'SpecifiedTradeProduct/SellerAssignedID'), qty: q ? parseFloat(q.textContent) : null, unit: attr(q, 'unitCode'),
+      price: net ?? gross, net: num(set, 'SpecifiedTradeSettlementLineMonetarySummation/LineTotalAmount'), discount: 0, discountPct: null, charge: 0,
+      taxes: kids(set, 'ApplicableTradeTax').map(ciiTax),
+    };
+  });
+  inv.taxes = kids(hs, 'ApplicableTradeTax').map(ciiTax);
+  const ms = kid(hs, 'SpecifiedTradeSettlementHeaderMonetarySummation');
+  const taxTot = kids(ms, 'TaxTotalAmount');
+  const mainTax = taxTot.find((e) => !attr(e, 'currencyID') || attr(e, 'currencyID') === inv.cur) || taxTot[0];
+  inv.totals = {
+    lineSum: num(ms, 'LineTotalAmount'), allowance: num(ms, 'AllowanceTotalAmount'), charge: num(ms, 'ChargeTotalAmount'), taxExcl: num(ms, 'TaxBasisTotalAmount'),
+    tax: mainTax ? parseFloat(mainTax.textContent) : null, taxIncl: num(ms, 'GrandTotalAmount'), rounding: num(ms, 'RoundingAmount'),
+    prepaid: num(ms, 'TotalPrepaidAmount'), payable: num(ms, 'DuePayableAmount'),
+  };
+  const terms = kids(hs, 'SpecifiedTradePaymentTerms');
+  inv.due = parseDT(tx(terms[0], 'DueDateDateTime/DateTimeString')).date;
+  inv.terms = terms.map((x) => tx(x, 'Description')).filter(Boolean);
+  inv.payments = kids(hs, 'SpecifiedTradeSettlementPaymentMeans').map((p) => ({
+    means: PAY_UN[tx(p, 'TypeCode')] || tx(p, 'TypeCode'), due: '', ref: '',
+    iban: tx(p, 'PayeePartyCreditorFinancialAccount/IBANID') || tx(p, 'PayeePartyCreditorFinancialAccount/ProprietaryID'),
+    bank: tx(p, 'PayeeSpecifiedCreditorFinancialInstitution/BICID'),
+  })).filter((p) => p.iban || p.means);
+  inv.exemptions = uniq(inv.taxes.concat(inv.lines.flatMap((l) => l.taxes)).map((s) => s.exemption));
+  inv.signed = hasDsig(root);
+  return inv;
+}
+
+// ===================== FatturaPA (Italy) =====================
+const TD_KIND = { TD01: 'inv', TD02: 'prepay', TD03: 'prepay', TD04: 'credit', TD05: 'debit', TD06: 'inv', TD07: 'inv', TD08: 'credit', TD09: 'debit', TD16: 'selfbill', TD17: 'selfbill', TD18: 'selfbill', TD19: 'selfbill', TD20: 'selfbill', TD21: 'selfbill', TD24: 'inv', TD25: 'inv', TD27: 'selfbill' };
+function faParty(w) {
+  if (!w) return null;
+  const da = kid(w, 'DatiAnagrafici'), an = kid(da, 'Anagrafica'), sede = kid(w, 'Sede');
+  const ids = [];
+  const vat = [tx(da, 'IdFiscaleIVA/IdPaese'), tx(da, 'IdFiscaleIVA/IdCodice')].join('');
+  if (vat) ids.push({ l: 'VAT ID', v: vat });
+  if (tx(da, 'CodiceFiscale')) ids.push({ l: 'C.F.', v: tx(da, 'CodiceFiscale') });
+  const lines = [];
+  if (sede) {
+    [[tx(sede, 'Indirizzo'), tx(sede, 'NumeroCivico')].filter(Boolean).join(' '), [tx(sede, 'CAP'), tx(sede, 'Comune'), tx(sede, 'Provincia') ? '(' + tx(sede, 'Provincia') + ')' : ''].filter(Boolean).join(' '), tx(sede, 'Nazione')].forEach((x) => { if (x) lines.push(x); });
+  }
+  return {
+    name: tx(an, 'Denominazione') || [tx(an, 'Nome'), tx(an, 'Cognome')].filter(Boolean).join(' '), sub: '', ids, taxOffice: '', lines,
+    tel: tx(w, 'Contatti/Telefono'), mail: tx(w, 'Contatti/Email'), web: '', contact: '',
+  };
+}
+function fattura(root) {
+  const header = kid(root, 'FatturaElettronicaHeader');
+  const seller = faParty(kid(header, 'CedentePrestatore')), buyer = faParty(kid(header, 'CessionarioCommittente'));
+  const progressive = tx(header, 'DatiTrasmissione/ProgressivoInvio');
+  const fmt = tx(header, 'DatiTrasmissione/FormatoTrasmissione') || attr(root, 'versione');
+  return kids(root, 'FatturaElettronicaBody').map((b) => {
+    const inv = baseInv('FatturaPA' + (fmt ? ' ' + fmt : ''));
+    const g = at(b, 'DatiGenerali/DatiGeneraliDocumento');
+    const td = tx(g, 'TipoDocumento');
+    inv.kind = TD_KIND[td] || 'other';
+    inv.typeNote = td;
+    inv.cur = tx(g, 'Divisa'); inv.id = tx(g, 'Numero'); inv.date = parseDT(tx(g, 'Data')).date;
+    inv.notes = kids(g, 'Causale').map((n) => n.textContent.trim()).filter(Boolean);
+    inv.seller = seller; inv.buyer = buyer;
+    const dg = kid(b, 'DatiGenerali');
+    const pushRef = (r) => { if (r) inv.refs.push(r); };
+    pushRef(ref('order', kids(dg, 'DatiOrdineAcquisto').map((x) => tx(x, 'IdDocumento')).filter(Boolean).join(', ')));
+    pushRef(ref('contract', kids(dg, 'DatiContratto').map((x) => tx(x, 'IdDocumento')).filter(Boolean).join(', ')));
+    pushRef(ref('despatch', kids(dg, 'DatiDDT').map((x) => tx(x, 'NumeroDDT')).filter(Boolean).join(', ')));
+    pushRef(ref('billing', kids(dg, 'DatiFattureCollegate').map((x) => tx(x, 'IdDocumento')).filter(Boolean).join(', ')));
+    pushRef(ref('transmission', progressive));
+    const dbs = kid(b, 'DatiBeniServizi');
+    inv.lines = kids(dbs, 'DettaglioLinee').map((l) => {
+      const qty = num(l, 'Quantita'), price = num(l, 'PrezzoUnitario'), net = num(l, 'PrezzoTotale');
+      const gross = qty != null && price != null ? r2(qty * price) : null;
+      const sc = kids(l, 'ScontoMaggiorazione').find((x) => tx(x, 'Tipo') === 'SC');
+      return {
+        n: tx(l, 'NumeroLinea'), name: tx(l, 'Descrizione'), desc: '', code: tx(l, 'CodiceArticolo/CodiceValore'), qty, unit: tx(l, 'UnitaMisura'), price, net,
+        discount: gross != null && net != null && gross - net > 0.005 ? r2(gross - net) : 0, discountPct: sc ? num(sc, 'Percentuale') : null, charge: 0,
+        taxes: [{ name: 'IVA', kind: 'vat', percent: num(l, 'AliquotaIVA'), base: null, amount: null, cat: '', exemption: tx(l, 'Natura') }],
+      };
+    });
+    inv.taxes = kids(dbs, 'DatiRiepilogo').map((r) => ({
+      name: 'IVA', kind: 'vat', percent: num(r, 'AliquotaIVA'), base: num(r, 'ImponibileImporto'), amount: num(r, 'Imposta'), cat: '',
+      exemption: [tx(r, 'Natura'), tx(r, 'RiferimentoNormativo')].filter(Boolean).join(' · '),
+    }));
+    const base = sum(inv.taxes, (x) => x.base), tax = sum(inv.taxes, (x) => x.amount);
+    const lineSum = sum(inv.lines, (l) => l.net);
+    inv.totals = Object.assign(emptyTotals(), {
+      lineSum: r2(lineSum), taxExcl: r2(base), tax: r2(tax), taxIncl: r2(base + tax), rounding: num(g, 'Arrotondamento'), payable: num(g, 'ImportoTotaleDocumento') ?? r2(base + tax),
+    });
+    if (!inv.taxes.length) { inv.totals.taxExcl = null; inv.totals.tax = null; inv.totals.taxIncl = null; }
+    inv.payments = kids(b, 'DatiPagamento').flatMap((dp) => kids(dp, 'DettaglioPagamento')).map((p) => ({
+      means: PAY_IT[tx(p, 'ModalitaPagamento')] || tx(p, 'ModalitaPagamento'), due: tx(p, 'DataScadenzaPagamento'), ref: '', iban: tx(p, 'IBAN'),
+      bank: tx(p, 'IstitutoFinanziario'), amount: num(p, 'ImportoPagamento'),
+    }));
+    inv.due = (inv.payments.find((p) => p.due) || {}).due || '';
+    inv.exemptions = uniq(inv.taxes.map((x) => x.exemption));
+    inv.signed = hasDsig(root);
+    return inv;
+  });
+}
+
+// ===================== CFDI (Mexico) =====================
+const MX_TAX = { '001': 'ISR', '002': 'IVA', '003': 'IEPS' };
+function cfdi(root) {
+  const A = (n) => attr(root, n);
+  const inv = baseInv('CFDI ' + (A('Version') || ''));
+  const tipo = A('TipoDeComprobante');
+  inv.kind = tipo === 'E' ? 'credit' : tipo === 'I' ? 'inv' : 'other';
+  inv.typeNote = tipo + (tipo === 'I' ? ' · Ingreso' : tipo === 'E' ? ' · Egreso' : tipo === 'T' ? ' · Traslado' : tipo === 'P' ? ' · Pago' : tipo === 'N' ? ' · Nómina' : '');
+  inv.cur = A('Moneda') || 'MXN';
+  inv.id = [A('Serie'), A('Folio')].filter(Boolean).join('-');
+  const dt = parseDT(A('Fecha'));
+  inv.date = dt.date; inv.time = dt.time;
+  const em = kid(root, 'Emisor'), re = kid(root, 'Receptor');
+  inv.seller = { name: attr(em, 'Nombre'), sub: '', ids: attr(em, 'Rfc') ? [{ l: 'RFC', v: attr(em, 'Rfc') }] : [], taxOffice: '', lines: [], tel: '', mail: '', web: '', contact: '' };
+  inv.buyer = { name: attr(re, 'Nombre'), sub: '', ids: attr(re, 'Rfc') ? [{ l: 'RFC', v: attr(re, 'Rfc') }] : [], taxOffice: '', lines: attr(re, 'DomicilioFiscalReceptor') ? ['C.P. ' + attr(re, 'DomicilioFiscalReceptor')] : [], tel: '', mail: '', web: '', contact: '' };
+  const cfdiTax = (x) => {
+    const code = attr(x, 'Impuesto'), factor = attr(x, 'TipoFactor'), rate = parseFloat(attr(x, 'TasaOCuota'));
+    return {
+      name: MX_TAX[code] || code, kind: code === '002' ? 'vat' : 'other', percent: factor === 'Tasa' && isFinite(rate) ? r2(rate * 100) : null,
+      base: N(attr(x, 'Base')), amount: N(attr(x, 'Importe')), cat: '', exemption: factor === 'Exento' ? 'Exento' : '',
+    };
+  };
+  inv.lines = kids(kid(root, 'Conceptos'), 'Concepto').map((c, i) => ({
+    n: String(i + 1), name: attr(c, 'Descripcion'), desc: '', code: attr(c, 'NoIdentificacion') || attr(c, 'ClaveProdServ'), qty: N(attr(c, 'Cantidad')),
+    unit: attr(c, 'Unidad') || attr(c, 'ClaveUnidad'), price: N(attr(c, 'ValorUnitario')), net: N(attr(c, 'Importe')), discount: N(attr(c, 'Descuento')) || 0, discountPct: null, charge: 0,
+    taxes: kids(at(c, 'Impuestos/Traslados'), 'Traslado').map(cfdiTax),
+  }));
+  inv.taxes = kids(at(root, 'Impuestos/Traslados'), 'Traslado').map(cfdiTax);
+  inv.withholding = kids(at(root, 'Impuestos/Retenciones'), 'Retencion').map(cfdiTax);
+  const sub = N(A('SubTotal')), dsc = N(A('Descuento'));
+  const tax = N(attr(kid(root, 'Impuestos'), 'TotalImpuestosTrasladados'));
+  inv.totals = Object.assign(emptyTotals(), {
+    lineSum: sub, allowance: dsc, taxExcl: sub != null ? r2(sub - (dsc || 0)) : null, tax, payable: N(A('Total')),
+  });
+  if (inv.totals.taxExcl != null && tax != null) inv.totals.taxIncl = r2(inv.totals.taxExcl + tax);
+  const pushRef = (r) => { if (r) inv.refs.push(r); };
+  pushRef(ref('uuid', attr(desc1(root, 'TimbreFiscalDigital'), 'UUID')));
+  pushRef(ref('issuePlace', A('LugarExpedicion')));
+  pushRef(ref('rate', A('TipoCambio') && A('TipoCambio') !== '1' ? A('TipoCambio') : ''));
+  inv.payments = A('FormaPago') ? [{ means: PAY_MX[A('FormaPago')] || A('FormaPago'), due: '', ref: '', iban: '', bank: '' }] : [];
+  const mp = A('MetodoPago');
+  if (mp) inv.terms.push(mp + (mp === 'PUE' ? ' · Pago en una sola exhibición' : mp === 'PPD' ? ' · Pago en parcialidades o diferido' : ''));
+  if (A('CondicionesDePago')) inv.terms.push(A('CondicionesDePago'));
+  inv.exemptions = uniq(inv.taxes.concat(inv.lines.flatMap((l) => l.taxes)).map((x) => x.exemption));
+  inv.signed = !!(A('Sello') || desc1(root, 'TimbreFiscalDigital'));
+  return inv;
+}
+
+// ===================== NF-e / NFC-e (Brazil) =====================
+function nfePerson(w, dest) {
+  if (!w) return null;
+  const ids = [];
+  const doc = tx(w, 'CNPJ') ? { l: 'CNPJ', v: tx(w, 'CNPJ') } : tx(w, 'CPF') ? { l: 'CPF', v: tx(w, 'CPF') } : tx(w, 'idEstrangeiro') ? { l: 'ID', v: tx(w, 'idEstrangeiro') } : null;
+  if (doc) ids.push(doc);
+  if (tx(w, 'IE')) ids.push({ l: 'IE', v: tx(w, 'IE') });
+  if (tx(w, 'IM')) ids.push({ l: 'IM', v: tx(w, 'IM') });
+  const a = kid(w, dest ? 'enderDest' : 'enderEmit');
+  const lines = [];
+  if (a) {
+    [[tx(a, 'xLgr'), tx(a, 'nro'), tx(a, 'xCpl')].filter(Boolean).join(', '), tx(a, 'xBairro'), [tx(a, 'CEP'), tx(a, 'xMun'), tx(a, 'UF')].filter(Boolean).join(' '), tx(a, 'xPais')].forEach((x) => { if (x) lines.push(x); });
+  }
+  return { name: tx(w, 'xNome'), sub: tx(w, 'xFant'), ids, taxOffice: '', lines, tel: tx(a, 'fone'), mail: tx(w, 'email'), web: '', contact: '' };
+}
+function nfe(inf, root) {
+  const ide = kid(inf, 'ide'), emit = kid(inf, 'emit'), dest = kid(inf, 'dest'), tot = at(inf, 'total/ICMSTot');
+  const mod = tx(ide, 'mod');
+  const inv = baseInv(mod === '65' ? 'NFC-e' : 'NF-e');
+  const fin = tx(ide, 'finNFe');
+  inv.kind = fin === '4' ? 'credit' : fin === '3' ? 'corrected' : fin === '2' ? 'debit' : 'inv';
+  inv.typeNote = [tx(ide, 'natOp'), tx(ide, 'serie') ? 'Série ' + tx(ide, 'serie') : ''].filter(Boolean).join(' · ');
+  inv.cur = 'BRL';
+  inv.id = tx(ide, 'nNF');
+  const dt = parseDT(tx(ide, 'dhEmi') || tx(ide, 'dEmi'));
+  inv.date = dt.date; inv.time = dt.time;
+  inv.seller = nfePerson(emit, false); inv.buyer = nfePerson(dest, true);
+  inv.lines = kids(inf, 'det').map((d) => {
+    const p = kid(d, 'prod'), imp = kid(d, 'imposto');
+    const taxes = [];
+    const icms = desc1(imp, 'pICMS') ? { name: 'ICMS', kind: 'other', percent: N(tx(desc1(imp, 'pICMS'))), amount: N(tx(desc1(imp, 'vICMS'))) } : null;
+    const ipi = desc1(imp, 'pIPI') ? { name: 'IPI', kind: 'other', percent: N(tx(desc1(imp, 'pIPI'))), amount: N(tx(desc1(imp, 'vIPI'))) } : null;
+    [icms, ipi].forEach((x) => { if (x) taxes.push(Object.assign({ base: null, cat: '', exemption: '' }, x)); });
+    return {
+      n: attr(d, 'nItem'), name: tx(p, 'xProd'), desc: [tx(p, 'NCM') ? 'NCM ' + tx(p, 'NCM') : '', tx(p, 'CFOP') ? 'CFOP ' + tx(p, 'CFOP') : ''].filter(Boolean).join(' · '),
+      code: tx(p, 'cProd'), qty: num(p, 'qCom'), unit: tx(p, 'uCom'), price: num(p, 'vUnCom'), net: num(p, 'vProd'), discount: num(p, 'vDesc') || 0, discountPct: null,
+      charge: (num(p, 'vFrete') || 0) + (num(p, 'vOutro') || 0), taxes,
+    };
+  });
+  const tl = (name, amountTag, baseTag, informational) => {
+    const a = num(tot, amountTag);
+    return a != null && a > 0 ? { name, kind: 'other', percent: null, base: baseTag ? num(tot, baseTag) : null, amount: a, cat: '', exemption: '', informational } : null;
+  };
+  inv.taxes = [tl('IPI', 'vIPI', '', false), tl('II', 'vII', '', false), tl('ICMS', 'vICMS', 'vBC', true), tl('PIS', 'vPIS', '', true), tl('COFINS', 'vCOFINS', '', true)].filter(Boolean);
+  inv.totals = Object.assign(emptyTotals(), {
+    lineSum: num(tot, 'vProd'), allowance: num(tot, 'vDesc'), charge: r2((num(tot, 'vFrete') || 0) + (num(tot, 'vSeg') || 0) + (num(tot, 'vOutro') || 0)) || null, payable: num(tot, 'vNF'),
+  });
+  const key = attr(inf, 'Id').replace(/^NFe/, '');
+  const pushRef = (r) => { if (r) inv.refs.push(r); };
+  pushRef(ref('accessKey', key.replace(/(.{4})/g, '$1 ').trim()));
+  pushRef(ref('protocol', tx(desc1(root, 'infProt'), 'nProt')));
+  inv.payments = kids(kid(inf, 'cobr'), 'dup').map((d) => ({ means: 'Duplicata ' + tx(d, 'nDup'), due: tx(d, 'dVenc'), ref: '', iban: '', bank: '', amount: num(d, 'vDup') }));
+  if (!inv.payments.length) {
+    inv.payments = kids(kid(inf, 'pag'), 'detPag').map((p) => ({ means: PAY_BR[tx(p, 'tPag')] || tx(p, 'tPag'), due: '', ref: '', iban: '', bank: '', amount: num(p, 'vPag') }));
+  }
+  inv.due = (inv.payments.find((p) => p.due) || {}).due || '';
+  inv.notes = [tx(inf, 'infAdic/infCpl'), tx(inf, 'infAdic/infAdFisco')].filter(Boolean);
+  inv.signed = hasDsig(root);
+  return inv;
+}
+
+// ===================== India e-Invoice (IRP JSON) =====================
+function india(j) {
+  const d = j.DocDtls || {}, s = j.SellerDtls || {}, b = j.BuyerDtls || {}, v = j.ValDtls || {};
+  const inv = baseInv('India e-Invoice' + (j.Version ? ' ' + j.Version : ''));
+  inv.kind = d.Typ === 'CRN' ? 'credit' : d.Typ === 'DBN' ? 'debit' : 'inv';
+  inv.typeNote = d.Typ || '';
+  inv.cur = 'INR';
+  inv.id = d.No || '';
+  inv.date = parseDT(d.Dt).date;
+  const party = (x) => ({
+    name: x.TrdNm || x.LglNm || '', sub: x.TrdNm && x.LglNm && x.TrdNm !== x.LglNm ? x.LglNm : '', ids: x.Gstin ? [{ l: 'GSTIN', v: x.Gstin }] : [], taxOffice: '',
+    lines: [[x.Addr1, x.Addr2].filter(Boolean).join(', '), [x.Loc, x.Pin].filter(Boolean).join(' ')].filter(Boolean), tel: x.Ph || '', mail: x.Em || '', web: '', contact: '',
+  });
+  inv.seller = party(s); inv.buyer = party(b);
+  inv.lines = (j.ItemList || []).map((it, i) => {
+    const gst = (N(it.CgstAmt) || 0) + (N(it.SgstAmt) || 0) + (N(it.IgstAmt) || 0);
+    return {
+      n: String(it.SlNo || i + 1), name: it.PrdDesc || '', desc: it.HsnCd ? 'HSN ' + it.HsnCd : '', code: '', qty: N(it.Qty), unit: it.Unit || '', price: N(it.UnitPrice), net: N(it.TotAmt),
+      discount: N(it.Discount) || 0, discountPct: null, charge: N(it.OthChrg) || 0,
+      taxes: [{ name: 'GST', kind: 'other', percent: N(it.GstRt), base: N(it.AssAmt), amount: r2(gst), cat: '', exemption: '' }],
+    };
+  });
+  const comp = (name, val) => (N(val) > 0 ? { name, kind: 'other', percent: null, base: null, amount: N(val), cat: '', exemption: '' } : null);
+  inv.taxes = [comp('CGST', v.CgstVal), comp('SGST', v.SgstVal), comp('IGST', v.IgstVal), comp('Cess', v.CesVal), comp('State cess', v.StCesVal)].filter(Boolean);
+  inv.totals = Object.assign(emptyTotals(), {
+    lineSum: r2(sum(inv.lines, (l) => l.net)), allowance: N(v.Discount), charge: N(v.OthChrg), taxExcl: N(v.AssVal), tax: r2(sum(inv.taxes, (x) => x.amount)), taxIncl: N(v.TotInvVal),
+    rounding: N(v.RndOffAmt), payable: N(v.TotInvVal),
+  });
+  const pushRef = (r) => { if (r) inv.refs.push(r); };
+  pushRef(ref('irn', j.Irn));
+  pushRef(ref('ack', j.AckNo ? String(j.AckNo) : '', j.AckDt ? parseDT(j.AckDt).date : '', { dd: true }));
+  pushRef(ref('billing', (j.RefDtls && j.RefDtls.PrecDocDtls ? j.RefDtls.PrecDocDtls : []).map((x) => x.InvNo).filter(Boolean).join(', ')));
+  const pay = j.PayDtls;
+  if (pay && (pay.Mode || pay.AccDet)) inv.payments = [{ means: pay.Mode || '', due: '', ref: '', iban: pay.AccDet || '', bank: [pay.Nm, pay.FinInsBr].filter(Boolean).join(' · ') }];
+  if (pay && pay.PayTerm) inv.terms.push(pay.PayTerm);
+  if (j.RefDtls && j.RefDtls.InvRm) inv.notes.push(j.RefDtls.InvRm);
+  inv.signed = null;
+  return inv;
+}
+function jwtPayload(tok) {
+  const p = String(tok).split('.')[1];
+  if (!p) return null;
+  const b64 = p.replace(/-/g, '+').replace(/_/g, '/');
+  const bin = atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4));
+  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  return JSON.parse(new TextDecoder('utf-8').decode(bytes));
+}
+function parseJson(s) {
+  let j;
+  try { j = JSON.parse(s); } catch (e) { throw new AppErr('badData'); }
+  const list = Array.isArray(j) ? j : [j];
+  const out = [];
+  list.forEach((x) => {
+    if (x && typeof x === 'object') {
+      let o = x;
+      if (!o.DocDtls && o.SignedInvoice) {
+        try {
+          const pl = jwtPayload(o.SignedInvoice);
+          const inner = typeof pl.data === 'string' ? JSON.parse(pl.data) : pl.data;
+          const outer = o;
+          o = inner;
+          ['Irn', 'AckNo', 'AckDt'].forEach((k) => { if (outer[k] != null) o[k] = outer[k]; });
+        } catch (e) { /* not decodable */ }
+      }
+      if (o.DocDtls && (o.ItemList || o.SellerDtls)) out.push(india(o));
+    }
+  });
+  if (!out.length) throw new AppErr('notInvoice', 'JSON');
+  return out;
+}
+
+// ===================== dispatcher =====================
+function parseRoot(root, ctx) {
+  const find = (names) => { for (const n of names) { if (root.localName === n) return root; const d = desc1(root, n); if (d) return d; } return null; };
+  let el;
+  if ((el = find(['Invoice', 'CreditNote', 'DebitNote']))) return [ubl(el)];
+  if ((el = find(['CrossIndustryInvoice']))) return [cii(el, ctx)];
+  if ((el = find(['FatturaElettronica']))) return fattura(el);
+  if (root.localName === 'Comprobante') return [cfdi(root)];
+  if ((el = find(['infNFe']))) return [nfe(el, root)];
+  if (root.localName === 'CrossIndustryDocument') throw new AppErr('zugferd1');
+  if (root.localName === 'ApplicationResponse') throw new AppErr('appResponse');
+  throw new AppErr('notInvoice', root.localName || '?');
+}
+function parseText(text, ctx) {
+  const s = String(text).replace(/^﻿/, '').trim();
+  if (!s) throw new AppErr('badData');
+  if (s[0] === '{' || s[0] === '[') return parseJson(s);
+  // Invoices never need a DTD. Refusing it blocks entity-expansion attacks.
+  if (/<!DOCTYPE|<!ENTITY/i.test(s)) throw new AppErr('unsafeXml');
+  return parseRoot(parseXml(s).documentElement, ctx || {});
+}
+
+// ===================== files: zip, pdf, p7m =====================
+const INFLATE_ONE = 80 * 1024 * 1024, INFLATE_TOTAL = 200 * 1024 * 1024;
+let inflateBudget = INFLATE_TOTAL;
+async function inflate(u8, fmt) {
+  if (typeof DecompressionStream === 'undefined') throw new AppErr('noDecomp');
+  const reader = new Blob([u8]).stream().pipeThrough(new DecompressionStream(fmt)).getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length; inflateBudget -= value.length;
+    if (total > INFLATE_ONE || inflateBudget < 0) { reader.cancel().catch(() => {}); throw new AppErr('tooBig'); }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let o = 0;
+  chunks.forEach((c) => { out.set(c, o); o += c.length; });
+  return out;
+}
+function readZip(u8) {
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 66000); i--) { if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; } }
+  if (eocd < 0) throw new AppErr('zipFail');
+  const count = dv.getUint16(eocd + 10, true);
+  let p = dv.getUint32(eocd + 16, true);
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    if (p + 46 > u8.length || dv.getUint32(p, true) !== 0x02014b50) break;
+    const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true);
+    const nlen = dv.getUint16(p + 28, true), elen = dv.getUint16(p + 30, true), clen = dv.getUint16(p + 32, true), lho = dv.getUint32(p + 42, true);
+    const name = new TextDecoder('utf-8').decode(u8.subarray(p + 46, p + 46 + nlen));
+    p += 46 + nlen + elen + clen;
+    if (name.endsWith('/')) continue;
+    const start = lho + 30 + dv.getUint16(lho + 26, true) + dv.getUint16(lho + 28, true);
+    const data = u8.subarray(start, start + csize);
+    out.push({ name, read: async () => (method === 0 ? data : method === 8 ? inflate(data, 'deflate-raw') : Promise.reject(new AppErr('zipFail'))) });
+  }
+  return out;
+}
+async function pdfEmbedded(u8) {
+  const s = new TextDecoder('latin1').decode(u8);
+  const re = /stream\r?\n/g;
+  const found = [];
+  let m;
+  while ((m = re.exec(s))) {
+    const idx = m.index;
+    if (s.substr(idx - 3, 3) === 'end') continue;
+    const dict = s.slice(s.lastIndexOf('obj', idx), idx);
+    if (!/EmbeddedFile/.test(dict)) continue;
+    const start = idx + m[0].length;
+    const end = s.indexOf('endstream', start);
+    if (end < 0) continue;
+    const lenM = /\/Length\s+(\d+)(?!\d)(?!\s+\d+\s+R)/.exec(dict);
+    let data = u8.subarray(start, lenM && start + parseInt(lenM[1], 10) <= end + 2 ? start + parseInt(lenM[1], 10) : end);
+    try {
+      if (/FlateDecode/.test(dict)) {
+        let res = null, fail = null;
+        // The stream may be followed by an EOL (0-2 bytes) before "endstream"; zlib rejects trailing bytes.
+        for (const cut of [0, 1, 2]) {
+          try { res = await inflate(lenM ? data : u8.subarray(start, end - cut), 'deflate'); break; } catch (e) { fail = e; if (e instanceof AppErr || lenM) break; }
+        }
+        if (!res) throw fail;
+        data = res;
+      }
+      const text = new TextDecoder('utf-8').decode(data);
+      if (/<(\w+:)?(CrossIndustryInvoice|Invoice|CreditNote)[\s>]/.test(text.slice(0, 6000))) found.push(text);
+    } catch (e) { if (e instanceof AppErr && e.k === 'tooBig') throw e; /* otherwise skip this stream */ }
+  }
+  return found;
+}
+function cutFattura(s) {
+  const a = s.search(/<\?xml|<(\w+:)?FatturaElettronica[\s>]/);
+  const re = /<\/(?:\w+:)?FatturaElettronica>/g;
+  let last = -1, m;
+  while ((m = re.exec(s))) last = m.index + m[0].length;
+  return a >= 0 && last > a ? s.slice(a, last) : null;
+}
+function xmlFromBinary(u8) {
+  const s = new TextDecoder('utf-8').decode(u8);
+  const r = cutFattura(s);
+  if (r) return r;
+  const compact = s.replace(/\s+/g, '');
+  if (/^[A-Za-z0-9+/=]{100,}$/.test(compact)) {
+    try { return cutFattura(new TextDecoder('utf-8').decode(Uint8Array.from(atob(compact), (c) => c.charCodeAt(0)))); } catch (e) { /* not base64 */ }
+  }
+  return null;
+}
+function decodeText(u8) {
+  if (u8[0] === 0xff && u8[1] === 0xfe) return new TextDecoder('utf-16le').decode(u8);
+  if (u8[0] === 0xfe && u8[1] === 0xff) return new TextDecoder('utf-16be').decode(u8);
+  const head = new TextDecoder('utf-8').decode(u8.subarray(0, 200));
+  const m = /encoding=["']([^"']+)["']/i.exec(head);
+  try { return new TextDecoder(m ? m[1].toLowerCase() : 'utf-8').decode(u8); } catch (e) { return new TextDecoder('utf-8').decode(u8); }
+}
+
+// ===================== rendering =====================
+const taxLabel = (x) => (x.kind === 'vat' ? t('vat') : x.name || t('taxCol'));
+const taxFull = (x) => taxLabel(x) + (x.percent != null ? ' ' + pct(x.percent) : '') + (x.cat && x.cat !== 'S' ? ' · ' + x.cat : '');
+
+function partyHtml(p, isBuyer) {
+  if (!p) return '';
+  const ids = p.ids.map((i) => '<div class="idline"><span class="k">' + esc(i.l) + '</span><span class="mono">' + esc(i.v) + '</span></div>').join('');
+  const tax = p.taxOffice ? '<div class="idline"><span class="k">' + esc(t('taxOffice')) + '</span>' + esc(p.taxOffice) + '</div>' : '';
+  const addr = p.lines.map((l) => '<div>' + esc(l) + '</div>').join('');
+  const contact = [p.contact, p.tel ? 'Tel: ' + p.tel : '', p.mail, p.web].filter(Boolean).map((x) => '<div class="cap">' + esc(x) + '</div>').join('');
+  const nm = esc(p.name || t('noName'));
+  return '<div class="party">' + (isBuyer ? '<h3>' + nm + '</h3>' : '<h2>' + nm + '</h2>') + (p.sub ? '<div>' + esc(p.sub) + '</div>' : '') + addr + ids + tax + contact + '</div>';
+}
+
+function lineRow(l, i, cols) {
+  const qty = l.qty == null ? '' : qtyF(l.qty) + (l.unit ? ' ' + esc(unitName(l.unit)) : '');
+  let disc = '';
+  if (l.discount) disc += '<div>-' + money(l.discount) + '</div>';
+  if (l.discountPct != null) disc += '<div class="cap">' + pct(l.discountPct) + '</div>';
+  if (l.charge) disc += '<div>+' + money(l.charge) + '</div>';
+  const tax = l.taxes.map((x) => '<div>' + esc(taxLabel(x)) + (x.percent != null ? ' ' + esc(pct(x.percent)) : '') + '</div>' + (x.amount != null ? '<div class="cap">' + money(x.amount) + '</div>' : '')).join('');
+  return '<tr>'
+    + '<td class="idx num" data-label="' + esc(t('no')) + '">' + esc(l.n || i + 1) + '</td>'
+    + '<td class="name"><strong>' + esc(l.name || t('unnamed')) + '</strong>'
+    + (l.desc && l.desc !== l.name ? '<span class="cap">' + esc(l.desc) + '</span>' : '')
+    + (l.code ? '<span class="cap">' + esc(t('code')) + ': ' + esc(l.code) + '</span>' : '') + '</td>'
+    + '<td class="num" data-label="' + esc(t('qty')) + '">' + qty + '</td>'
+    + '<td class="num" data-label="' + esc(t('price')) + '">' + priceF(l.price) + '</td>'
+    + (cols.disc ? '<td class="num" data-label="' + esc(t('disc')) + '">' + (disc ? '<div class="v">' + disc + '</div>' : '') + '</td>' : '')
+    + (cols.tax ? '<td class="num" data-label="' + esc(cols.taxHead) + '">' + (tax ? '<div class="v">' + tax + '</div>' : '') + '</td>' : '')
+    + '<td class="num" data-label="' + esc(t('amount')) + '">' + money(l.net) + '</td></tr>';
+}
+
+function totalsHtml(inv) {
+  const tt = inv.totals, c = curLabel(inv.cur), rows = [];
+  const add = (label, val, cls) => { if (val == null) return; rows.push('<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + esc(label) + '</td><td>' + money(val) + (c ? ' ' + esc(c) : '') + '</td></tr>'); };
+  add(t('lineSum'), tt.lineSum);
+  if (tt.allowance) add(t('allowance'), tt.allowance);
+  if (tt.charge) add(t('charge'), tt.charge);
+  add(t('taxExcl'), tt.taxExcl);
+  inv.taxes.filter((x) => !x.informational).forEach((x) => add((t('calc') ? t('calc') + ' ' : '') + taxFull(x), x.amount));
+  add(t('taxIncl'), tt.taxIncl);
+  inv.withholding.forEach((x) => add(t('withholding') + ': ' + taxFull(x), x.amount));
+  if (tt.rounding) add(t('rounding'), tt.rounding);
+  if (tt.prepaid) add(t('prepaid'), tt.prepaid);
+  add(t('payable'), tt.payable, 'grand');
+  inv.taxes.filter((x) => x.informational).forEach((x) => add(taxFull(x) + ' (' + t('included') + ')', x.amount, 'incl'));
+  return rows.length ? '<table class="totals"><tbody>' + rows.join('') + '</tbody></table>' : '';
+}
+
+function refText(r) {
+  const a = r.vd ? fdate(r.v) : r.v;
+  const b = r.d ? (r.dd ? fdate(r.d) : r.d) : '';
+  return a + (b ? (r.range ? ' – ' : ' / ') + b : '');
+}
+
+function renderInvoice(inv, opts) {
+  opts = opts || {};
+  const isTR = inv.format === 'UBL-TR';
+  let headline, sub;
+  if (isTR) {
+    headline = inv.trProfile === 'EARSIVFATURA' ? t('eArchive') : t('eInvoice');
+    sub = (inv.typeParts || []).map(pick).concat(inv.copy ? [t('copy')] : []).join(' · ');
+  } else {
+    headline = pick(KINDS[inv.kind] || KINDS.other);
+    sub = inv.typeNote || '';
+  }
+  const meta = [[t('invoiceNo'), inv.id], [t('date'), fdate(inv.date) + (inv.time ? ' ' + inv.time : '')], [t('due'), fdate(inv.due)]]
+    .concat(inv.refs.map((r) => [t(r.k), refText(r)])).concat([[t('currency'), inv.cur]]).filter((r) => r[1] && String(r[1]).trim());
+  const metaHtml = meta.map((r) => '<dt>' + esc(r[0]) + '</dt><dd>' + esc(r[1]) + '</dd>').join('');
+
+  const cols = { disc: inv.lines.some((l) => l.discount || l.discountPct != null || l.charge), tax: inv.lines.some((l) => l.taxes.length) };
+  cols.taxHead = inv.lines.every((l) => l.taxes.every((x) => x.kind === 'vat')) ? t('vat') : t('taxCol');
+  const table = inv.lines.length
+    ? '<div class="tablewrap"><table class="items"><thead><tr><th class="num">' + esc(t('no')) + '</th><th>' + esc(t('item')) + '</th><th class="num">' + esc(t('qty')) + '</th><th class="num">' + esc(t('price')) + '</th>'
+      + (cols.disc ? '<th class="num">' + esc(t('disc')) + '</th>' : '') + (cols.tax ? '<th class="num">' + esc(cols.taxHead) + '</th>' : '') + '<th class="num">' + esc(t('amount')) + '</th></tr></thead><tbody>'
+      + inv.lines.map((l, i) => lineRow(l, i, cols)).join('') + '</tbody></table></div>'
+    : '<p class="empty-lines">' + esc(t('noItems')) + '</p>';
+
+  const left = [];
+  if (inv.notes.length) left.push('<div><div class="eyebrow">' + esc(t('notes')) + '</div><ul>' + inv.notes.map((n) => '<li>' + esc(n) + '</li>').join('') + '</ul></div>');
+  const pay = inv.payments.map((p) => {
+    const head = [pick(p.means), p.due ? t('dueShort') + ': ' + fdate(p.due) : '', p.amount != null ? money(p.amount) + ' ' + curLabel(inv.cur) : ''].filter(Boolean).join(' · ');
+    return '<li>' + esc(head) + (p.ref ? '<div class="cap">' + esc(p.ref) + '</div>' : '') + (p.iban ? '<div class="mono">' + esc(fmtIban(p.iban)) + '</div>' : '') + (p.bank ? '<div class="cap">' + esc(p.bank) + '</div>' : '') + '</li>';
+  }).concat(inv.terms.map((x) => '<li>' + esc(x) + '</li>'));
+  if (pay.length) left.push('<div><div class="eyebrow">' + esc(t('payment')) + '</div><ul>' + pay.join('') + '</ul></div>');
+  if (inv.exemptions.length) left.push('<div><div class="eyebrow">' + esc(t('exempt')) + '</div><ul>' + inv.exemptions.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul></div>');
+
+  const words = isTR ? amountInWords(inv.totals.payable, inv.cur) : '';
+  const fine = [];
+  if (opts.fileName) fine.push('<span>' + esc(t('file')) + ': ' + esc(opts.fileName) + '</span>');
+  fine.push('<span>' + esc(t('formatLbl')) + ': ' + esc(inv.format) + '</span>');
+  if (inv.signed !== null) fine.push('<span>' + esc(t(inv.signed ? 'sigYes' : 'sigNo')) + '</span>');
+
+  return '<div class="head"><div><div class="eyebrow">' + esc(t('seller')) + '</div>' + partyHtml(inv.seller, false) + '</div>'
+    + '<div class="docbox"><span class="fmt">' + esc(inv.format) + '</span><div class="label">' + esc(headline) + '</div><div class="kind">' + esc(sub) + '</div>'
+    + '<dl class="meta">' + metaHtml + '</dl></div></div>'
+    + (inv.buyer ? '<div class="buyer"><div class="eyebrow">' + esc(isTR ? t('buyerTR') : t('buyer')) + '</div>' + partyHtml(inv.buyer, true) + '</div>' : '')
+    + table
+    + '<div class="foot"><div class="foot-left">' + left.join('') + '</div><div>' + totalsHtml(inv) + '</div></div>'
+    + (words ? '<div class="words"><strong>' + esc(t('words')) + '</strong> ' + esc(words) + '</div>' : '')
+    + '<div class="fine">' + fine.join('') + '</div>';
+}
+
+// ===================== copy helpers =====================
+const flat = (s) => String(s == null ? '' : s).replace(/[\t\r\n]+/g, ' ').trim();
+const plain = (v) => (v == null ? '' : lang === 'tr' ? v.toFixed(2).replace('.', ',') : v.toFixed(2));
+const plainQ = (v) => (v == null ? '' : lang === 'tr' ? String(v).replace('.', ',') : String(v));
+function lineTSV(inv) {
+  const head = [t('no'), t('item'), t('qty'), t('unit'), t('price'), t('disc'), t('taxRate'), t('taxAmt'), t('amount')];
+  const rows = inv.lines.map((l, i) => {
+    const x = l.taxes.find((y) => y.kind === 'vat') || l.taxes[0] || {};
+    return [l.n || i + 1, flat(l.name), plainQ(l.qty), unitName(l.unit), plain(l.price), plain(l.discount || 0), plainQ(x.percent), plain(x.amount), plain(l.net)].join('\t');
+  });
+  return [head.join('\t')].concat(rows).join('\n');
+}
+function summaryText(inv) {
+  const c = curLabel(inv.cur);
+  const who = (p) => (p ? [p.name, p.ids.map((i) => i.l + ' ' + i.v).join(', '), p.taxOffice ? t('taxOffice') + ' ' + p.taxOffice : ''].filter(Boolean).join(' · ') : '');
+  const out = [t('invoiceNo') + ': ' + inv.id, t('date') + ': ' + fdate(inv.date) + (inv.time ? ' ' + inv.time : '')];
+  inv.refs.forEach((r) => out.push(t(r.k) + ': ' + refText(r)));
+  out.push(t('seller') + ': ' + who(inv.seller), t('buyer') + ': ' + who(inv.buyer), '');
+  inv.lines.forEach((l, i) => out.push((i + 1) + '. ' + flat(l.name) + ' · ' + (l.qty == null ? '' : qtyF(l.qty) + ' ' + unitName(l.unit)) + ' × ' + priceF(l.price) + ' = ' + money(l.net) + ' ' + c));
+  out.push('');
+  const tt = inv.totals;
+  if (tt.taxExcl != null) out.push(t('taxExcl') + ': ' + money(tt.taxExcl) + ' ' + c);
+  inv.taxes.forEach((x) => out.push(taxFull(x) + ': ' + money(x.amount) + ' ' + c));
+  if (tt.payable != null) out.push(t('payable') + ': ' + money(tt.payable) + ' ' + c);
+  return out.join('\n');
+}
+
+// ===================== app =====================
+const $ =(id) => document.getElementById(id);
+let items = [];
+let current = -1;
+let seq = 0;
+let toastTimer = null;
+
+const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* storage unavailable */ } },
+};
+const effectiveTheme = () => document.documentElement.getAttribute('data-theme') || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+
+function toast(msg) {
+  const el = $('toast');
+  el.firstElementChild.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
+}
+async function copyText(text, msg) {
+  try { await navigator.clipboard.writeText(text); toast(msg); return; } catch (e) { /* fall back below */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    toast(ok ? msg : t('copyFail'));
+  } catch (e) { toast(t('copyFail')); }
+}
+
+function applyStatic() {
+  document.documentElement.lang = lang;
+  document.title = t('title');
+  document.querySelectorAll('[data-i]').forEach((el) => { el.textContent = t(el.dataset.i); });
+  document.querySelectorAll('#langSeg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.lang === lang)));
+  const dark = effectiveTheme() === 'dark';
+  const btn = $('themeBtn');
+  btn.innerHTML = dark ? SUN : MOON;
+  btn.setAttribute('aria-label', t(dark ? 'toLight' : 'toDark'));
+  btn.title = t(dark ? 'toLight' : 'toDark');
+}
+
+const mkItem = (name, inv) => ({ id: ++seq, name, inv });
+const errItem = (name, e) => ({ id: ++seq, name, err: e instanceof AppErr ? { k: e.k, a: e.a } : { k: 'readFail', a: [] } });
+
+async function ingest(name, u8, out, depth) {
+  const isPdf = u8.length > 4 && u8[0] === 0x25 && u8[1] === 0x50 && u8[2] === 0x44 && u8[3] === 0x46;
+  const isZip = u8.length > 4 && u8[0] === 0x50 && u8[1] === 0x4b && u8[2] === 3 && u8[3] === 4;
+  try {
+    if (isZip) {
+      if (depth > 1) throw new AppErr('zipFail');
+      const entries = readZip(u8).filter((e) => /\.(xml|json|pdf|p7m|zip)$/i.test(e.name) && !/__MACOSX|(^|\/)\./.test(e.name)).slice(0, 300);
+      if (!entries.length) throw new AppErr('zipEmpty');
+      for (const e of entries) {
+        let bytes;
+        try { bytes = await e.read(); } catch (err) { out.push(errItem(e.name.split('/').pop(), err)); continue; }
+        await ingest(e.name.split('/').pop(), bytes, out, depth + 1);
+      }
+      return;
+    }
+    if (isPdf) {
+      const xmls = await pdfEmbedded(u8);
+      let got = 0, lastErr = null;
+      for (const x of xmls) {
+        try { parseText(x, { fromPdf: true }).forEach((inv) => { out.push(mkItem(name, inv)); got++; }); } catch (e) { lastErr = e; }
+      }
+      if (!got) throw lastErr || new AppErr('pdfNoXml');
+      return;
+    }
+    let text = decodeText(u8);
+    let viaBinary = false;
+    if (!/^\s*[<{[]/.test(text.replace(/^﻿/, ''))) {
+      const x = xmlFromBinary(u8);
+      if (!x) throw new AppErr('badData');
+      text = x; viaBinary = true;
+    }
+    const invs = parseText(text, {});
+    invs.forEach((inv) => { if (viaBinary) inv.signed = true; out.push(mkItem(name, inv)); });
+  } catch (e) { out.push(errItem(name, e)); }
+}
+
+async function addItems(fn) {
+  const out = [];
+  inflateBudget = INFLATE_TOTAL;
+  await fn(out);
+  if (!out.length) return;
+  const firstNew = items.length;
+  items.push(...out);
+  const ok = items.findIndex((it, i) => i >= firstNew && it.inv);
+  current = ok >= 0 ? ok : firstNew;
+  render();
+}
+async function handleFiles(list) {
+  const files = Array.from(list || []);
+  if (!files.length) return;
+  await addItems(async (out) => {
+    for (const f of files) {
+      try {
+        if (f.size > 80 * 1024 * 1024) throw new AppErr('tooBig');
+        await ingest(f.name, new Uint8Array(await f.arrayBuffer()), out, 0);
+      } catch (e) { out.push(errItem(f.name, e)); }
+    }
+  });
+}
+async function handlePaste(text) {
+  const s = text.trim();
+  await addItems((out) => ingest(s[0] === '<' ? 'pasted.xml' : 'pasted.json', new TextEncoder().encode(s), out, 0));
+}
+
+function render() {
+  const chips = $('chips');
+  chips.textContent = '';
+  if (items.length) {
+    items.forEach((it, idx) => {
+      const chip = document.createElement('span');
+      chip.className = 'chip' + (it.err ? ' bad' : '');
+      if (idx === current) chip.setAttribute('aria-current', 'true');
+      const sel = document.createElement('button');
+      sel.type = 'button'; sel.className = 'sel';
+      sel.textContent = it.inv && it.inv.id ? it.name + ' · ' + it.inv.id : it.name;
+      sel.title = it.name;
+      sel.addEventListener('click', () => { current = idx; render(); });
+      const x = document.createElement('button');
+      x.type = 'button'; x.className = 'x'; x.textContent = '×'; x.setAttribute('aria-label', t('remove', it.name));
+      x.addEventListener('click', () => {
+        items.splice(idx, 1);
+        current = items.length ? Math.min(idx < current ? current - 1 : current, items.length - 1) : -1;
+        render();
+      });
+      chip.appendChild(sel); chip.appendChild(x); chips.appendChild(chip);
+    });
+  }
+  const it = items[current];
+  const notices = $('notices');
+  notices.textContent = '';
+  const addNotice = (cls, text) => { const d = document.createElement('div'); d.className = 'notice ' + cls; d.textContent = text; notices.appendChild(d); };
+  if (it && it.err) addNotice('err', it.name + ': ' + t(it.err.k, ...it.err.a));
+  const sheet = $('sheet');
+  if (it && it.inv) {
+    sheet.innerHTML = renderInvoice(it.inv, { fileName: it.name });
+    $('actions').hidden = false;
+  } else {
+    sheet.innerHTML = '';
+    $('actions').hidden = true;
+  }
+}
+function setLang(l) {
+  lang = l;
+  store.set('fo-lang', l);
+  applyStatic();
+  render();
+}
+
+$('pick').addEventListener('change', (e) => { handleFiles(e.target.files); e.target.value = ''; });
+['dragenter', 'dragover'].forEach((ev) => window.addEventListener(ev, (e) => { e.preventDefault(); $('drop').classList.add('over'); }));
+window.addEventListener('dragleave', (e) => { if (!e.relatedTarget) $('drop').classList.remove('over'); });
+window.addEventListener('drop', (e) => { e.preventDefault(); $('drop').classList.remove('over'); handleFiles(e.dataTransfer && e.dataTransfer.files); });
+window.addEventListener('paste', (e) => {
+  const txt = e.clipboardData && e.clipboardData.getData('text');
+  if (txt && /^\s*[<{[]/.test(txt)) { e.preventDefault(); handlePaste(txt); }
+});
+$('copySummary').addEventListener('click', () => { const it = items[current]; if (it && it.inv) copyText(summaryText(it.inv), t('copiedSummary')); });
+$('copyLines').addEventListener('click', () => { const it = items[current]; if (it && it.inv) copyText(lineTSV(it.inv), t('copiedLines')); });
+document.querySelectorAll('#langSeg button').forEach((b) => b.addEventListener('click', () => setLang(b.dataset.lang)));
+$('themeBtn').addEventListener('click', () => {
+  const next = effectiveTheme() === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  store.set('fo-theme', next);
+  applyStatic();
+});
+
+(function init() {
+  const sl = store.get('fo-lang');
+  lang = sl === 'tr' || sl === 'en' ? sl : /^tr/i.test(navigator.language || '') ? 'tr' : 'en';
+  const th = store.get('fo-theme');
+  if (th === 'light' || th === 'dark') document.documentElement.setAttribute('data-theme', th);
+  applyStatic();
+  render();
+  try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyStatic); } catch (e) { /* older browsers */ }
+})();
+</script>
