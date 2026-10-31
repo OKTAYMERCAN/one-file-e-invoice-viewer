@@ -30,14 +30,11 @@ A single HTML file that opens e-invoice files from around the world and shows th
 Limits: it does not verify digital signatures, it only tells you whether the file contains one. ZUGFeRD 1.0 and non-invoice documents (despatch advice, application responses) are not supported and show a clear message. Signed `.p7m` files are read on a best-effort basis. Each file or unpacked archive is limited to 80 MB.
 
 ## 📸 Screenshots
-
-(Pure Black theme with example invoice)
-<img width="923" height="1316" alt="preview" src="https://github.com/user-attachments/assets/dfaa5d19-aa8a-4f15-968f-660505dc22a7" />
-
 (Light theme with example invoice)
 <img width="914" height="1213" alt="image" src="https://github.com/user-attachments/assets/94245efe-552c-4b94-a92c-5d7f531e47c9" />
 
-
+(Pure Black theme with example invoice)
+<img width="923" height="1316" alt="preview" src="https://github.com/user-attachments/assets/dfaa5d19-aa8a-4f15-968f-660505dc22a7" />
 
 ## 📄 License
 
