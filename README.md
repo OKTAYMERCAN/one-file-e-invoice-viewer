@@ -31,14 +31,13 @@ Limits: it does not verify digital signatures, it only tells you whether the fil
 
 ## 📸 Screenshots
 
-(Dark theme, UBL-TR)  
-<img width="1100" alt="Dark theme, UBL-TR invoice" src="screenshots/1-dark-ubl-tr.png" />
+(Pure Black theme with example invoice)
+<img width="923" height="1316" alt="preview" src="https://github.com/user-attachments/assets/dfaa5d19-aa8a-4f15-968f-660505dc22a7" />
 
-(Light theme, PEPPOL BIS)  
-<img width="1100" alt="Light theme, PEPPOL BIS invoice" src="screenshots/2-light-peppol.png" />
+(Light theme with example invoice)
+<img width="914" height="1213" alt="image" src="https://github.com/user-attachments/assets/94245efe-552c-4b94-a92c-5d7f531e47c9" />
 
-(Phone, dark theme, NF-e, Turkish interface)  
-<img width="400" alt="Phone view, NF-e invoice" src="screenshots/3-mobile-dark-nfe.png" />
+
 
 ## 📄 License
 
